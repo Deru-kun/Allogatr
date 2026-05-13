@@ -19,27 +19,42 @@ function checkAuth() {
   if (authData) {
     try {
       const auth = JSON.parse(authData);
-      if (auth.loggedIn) return true;
+      if (auth.loggedIn) return auth;
     } catch (e) {
-      return false;
+      return null;
     }
   }
-  return false;
+  return null;
 }
 
 function initMainApp() {
   app.innerHTML = '';
   app.className = 'app-layout';
 
+  const auth = checkAuth();
+  let userName = 'Utente Sconosciuto';
+  let initial = 'U';
+  
+  if (auth && auth.user) {
+    const dbUser = state.getUser(auth.user);
+    if (dbUser) {
+      userName = `${dbUser.name} ${dbUser.surname}`;
+      initial = dbUser.name.charAt(0).toUpperCase();
+    } else {
+      userName = auth.user.split('@')[0];
+      initial = userName.charAt(0).toUpperCase();
+    }
+  }
+
   // Sidebar
   const sidebar = el('aside', { className: 'sidebar' }, [
     el('div', { className: 'sidebar-brand' }, [
       el('img', { src: '/logo.png', className: 'logo-img', alt: 'Allogatr Logo' }),
     ]),
-    el('div', { className: 'user-profile' }, [
-      el('div', { className: 'avatar', textContent: 'A' }),
+    el('div', { className: 'user-profile', style: 'cursor: pointer;', onClick: () => { window.location.hash = '#/account'; } }, [
+      el('div', { className: 'avatar', textContent: initial }),
       el('div', { className: 'user-info' }, [
-        el('strong', { textContent: 'Andrea Bertini' }),
+        el('strong', { textContent: userName }),
         el('span', { textContent: 'Personal Account' }),
       ]),
     ]),
@@ -152,6 +167,10 @@ function handleRoute() {
     if (navItem) navItem.classList.add('active');
     updateTopbar('Project Estimator', 'Stima il budget e alloca le risorse.');
     renderEstimator(content, segments[1]);
+  } else if (segments[0] === 'account') {
+    document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
+    updateTopbar('Account', 'Gestione del tuo profilo personale.');
+    content.innerHTML = '<div class="glass-card" style="padding: 2rem;"><h3>Impostazioni Account</h3><p>Area in costruzione. Qui potrai modificare i tuoi dati personali, la password e le preferenze.</p></div>';
   } else {
     window.location.hash = '#/projects';
   }
