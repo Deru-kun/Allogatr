@@ -66,12 +66,12 @@ export function renderLogin(container, onLoginSuccess) {
     toggleModeText.style.fontSize = '0.875rem';
     toggleModeText.style.color = 'var(--text-muted)';
     toggleModeText.innerHTML = isRegisterMode 
-      ? 'Hai già un account? <a href="#" id="toggle-login-mode" style="color: var(--primary);">Accedi</a>'
-      : 'Non hai un account? <a href="#" id="toggle-login-mode" style="color: var(--primary);">Registrati</a>';
+      ? 'Hai già un account? <a href="#" class="toggle-mode-link" style="color: var(--primary);">Accedi</a>'
+      : 'Non hai un account? <a href="#" class="toggle-mode-link" style="color: var(--primary);">Registrati</a>';
     
     form.appendChild(toggleModeText);
 
-    document.getElementById('toggle-login-mode').addEventListener('click', (e) => {
+    toggleModeText.querySelector('.toggle-mode-link').addEventListener('click', (e) => {
       e.preventDefault();
       isRegisterMode = !isRegisterMode;
       renderForm();
