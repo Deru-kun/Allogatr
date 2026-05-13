@@ -246,6 +246,8 @@ export function renderDashboard(container) {
             }
           }
         });
+      }
+
       // Team Chart (Doughnut) - New
       const ctxTeam = document.getElementById('teamChart');
       if (ctxTeam) {
