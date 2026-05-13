@@ -1,14 +1,22 @@
-import { uuid, getYearWeek, getWeeksBetween } from './utils.js';
-import { PROJECT_TEMPLATES, getMembersByRole, getMemberById } from './data.js';
+import { uuid, getYearWeek, toISODate, getWeeksBetween } from './utils.js';
+import { TEAM_DATABASE, PROJECT_TEMPLATES, getMembersByRole, getMemberById } from './data.js';
 
-const STORAGE_KEY = 'allogatr_projects';
+const STORAGE_KEY = 'allogatr_projects_v3';
 
 // ─── State ─────────────────────────────────────────────
 class AppState {
   constructor() {
-    this.projects = this._load();
+    const data = this._load() || {};
+    this.projects = data.projects || {};
+    this.resources = (data.resources && data.resources.length > 0) ? data.resources : [...TEAM_DATABASE];
+    this.timesheets = data.timesheets || {};
+    this.timesheetSettings = data.timesheetSettings || {};
     this.listeners = [];
     this.searchQuery = '';
+
+    if (Object.keys(this.projects).length < 5) {
+      this.seedDemoProjects();
+    }
   }
 
   setSearchQuery(q) {
@@ -49,8 +57,7 @@ class AppState {
   getRoleCapacity() {
     const roleStats = {}; // { roleName: { total: X, allocated: Y } }
     
-    // Total capacity from DB
-    TEAM_DATABASE.forEach(m => {
+    this.resources.forEach(m => {
       if (m.id === 36) return;
       const role = m.titolo || 'Altro';
       if (!roleStats[role]) roleStats[role] = { total: 0, allocated: 0 };
@@ -63,7 +70,7 @@ class AppState {
       
       for (const member of project.team) {
         const rid = member.risorsaId;
-        const resData = getMemberById(rid);
+        const resData = this.getResourceById(rid);
         if (!resData) continue;
         
         const role = resData.titolo || 'Altro';
@@ -83,12 +90,15 @@ class AppState {
   _load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      return raw ? JSON.parse(raw) : {};
-    } catch { return {}; }
+      return raw ? JSON.parse(raw) : null;
+    } catch { return null; }
   }
 
   _save() {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(this.projects));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      projects: this.projects,
+      resources: this.resources
+    }));
     this.listeners.forEach(fn => fn());
   }
 
@@ -259,7 +269,50 @@ class AppState {
     return allocation;
   }
 
-  // ─── Export / Import ──────────────────────────────────
+  // ─── Resources Helpers ───────────────────────────────
+  getResourceById(id) {
+    return this.resources.find(r => r.id == id);
+  }
+
+  getResourcesByRole(role) {
+    return this.resources.filter(r => r.titolo === role && r.disponibile);
+  }
+
+  getAllRoles() {
+    return [...new Set(this.resources.map(r => r.titolo).filter(Boolean))].sort();
+  }
+
+  // ─── Resources CRUD ──────────────────────────────────
+  updateResource(id, updates) {
+    const res = this.resources.find(r => r.id === id);
+    if (res) {
+      Object.assign(res, updates);
+      this._save();
+    }
+  }
+
+  deleteResource(id) {
+    this.resources = this.resources.filter(r => r.id !== id);
+    this._save();
+  }
+
+  createResource() {
+    const nextId = Math.max(0, ...this.resources.map(r => r.id)) + 1;
+    const newRes = {
+      id: nextId,
+      cognome: 'Nuova Risorsa',
+      titolo: 'Ruolo',
+      tipologia: 'Dipendente',
+      costoGg: 0,
+      rateGg: 0,
+      giorniSett: 5.0,
+      disponibile: true,
+      team: 'Other'
+    };
+    this.resources.push(newRes);
+    this._save();
+    return newRes;
+  }
   exportJSON() {
     return JSON.stringify(this.projects, null, 2);
   }
@@ -271,6 +324,116 @@ class AppState {
       this._save();
       return true;
     } catch { return false; }
+  }
+  // ─── Timesheet Management ──────────────────────────────
+  getTimesheetSettings(userId) {
+    if (!this.timesheetSettings[userId]) {
+      this.timesheetSettings[userId] = {
+        visibleDays: [1, 2, 3, 4, 5], // Mon-Fri
+        sortBy: 'manual',
+        projects: [] // Array of project IDs
+      };
+    }
+    return this.timesheetSettings[userId];
+  }
+
+  saveTimesheetSettings(userId, settings) {
+    this.timesheetSettings[userId] = { ...this.getTimesheetSettings(userId), ...settings };
+    this._save();
+  }
+
+  getTimesheetData(userId, yearWeek) {
+    if (!this.timesheets[userId]) this.timesheets[userId] = {};
+    if (!this.timesheets[userId][yearWeek]) this.timesheets[userId][yearWeek] = {};
+    return this.timesheets[userId][yearWeek];
+  }
+
+  saveTimesheetEntry(userId, yearWeek, projectId, dateStr, billable, nonBillable) {
+    const data = this.getTimesheetData(userId, yearWeek);
+    if (!data[projectId]) data[projectId] = {};
+    data[projectId][dateStr] = { billable, nonBillable };
+    this._save();
+  }
+
+  seedDemoProjects() {
+    this.projects = {}; // Clear existing to avoid partial data
+    const clients = [
+      "Ferrari", "Prada", "Armani", "Eni", "Enel", 
+      "Gucci", "L'Oreal", "Nestlé", "Barilla", "Fiat", 
+      "Iveco", "Leonardo", "TIM", "Vodafone", "Sky"
+    ];
+    const statuses = ["In Corso", "Draft", "Archiviato"];
+    const now = new Date();
+    const bertini = this.getResourceById(1);
+
+    clients.forEach((client, i) => {
+      const id = uuid();
+      const status = statuses[i % 3];
+      const start = new Date();
+      start.setDate(now.getDate() - (30 + i * 2));
+      const end = new Date();
+      end.setDate(now.getDate() + (60 - i));
+
+      const proj = {
+        id,
+        nome: `Digital Transformation ${i + 1}`,
+        cliente: client,
+        stato: status,
+        dataInizio: toISODate(start),
+        dataFine: toISODate(end),
+        tipo: "Time & Material",
+        budget: 50000 + (i * 10000),
+        costiEsterni: 2000,
+        licenze: 1000,
+        bdFeePercent: 3,
+        team: [],
+        updatedAt: new Date().toISOString()
+      };
+
+      // Always allocate Bertini (ID 1)
+      if (bertini) {
+        proj.team.push({
+          rowId: uuid(),
+          risorsaId: bertini.id,
+          cognome: bertini.cognome,
+          ruolo: "Manager",
+          livello: bertini.tipologia,
+          costoStandard: bertini.costoGg,
+          rateStandard: bertini.rateGg,
+          rateAccordato: bertini.rateGg,
+          dataInizio: proj.dataInizio,
+          dataFine: proj.dataFine,
+          settimane: {
+            "W1": 0.5, "W2": 1, "W3": 0.5, "W4": 1, "W5": 0.5, "W6": 1, "W7": 0.5, "W8": 1
+          }
+        });
+      }
+
+      // Add 2 random resources from the database
+      for (let j = 0; j < 2; j++) {
+        const otherId = ((i + j) % 35) + 2;
+        const otherRes = this.getResourceById(otherId);
+        if (otherRes && otherRes.id !== 1) {
+          proj.team.push({
+            rowId: uuid(),
+            risorsaId: otherRes.id,
+            cognome: otherRes.cognome,
+            ruolo: otherRes.titolo,
+            livello: otherRes.tipologia,
+            costoStandard: otherRes.costoGg,
+            rateStandard: otherRes.rateGg,
+            rateAccordato: otherRes.rateGg,
+            dataInizio: proj.dataInizio,
+            dataFine: proj.dataFine,
+            settimane: { "W1": 1, "W2": 1, "W3": 1, "W4": 1 }
+          });
+        }
+      }
+
+      this.projects[id] = proj;
+    });
+
+    this._save();
   }
 }
 

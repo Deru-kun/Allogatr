@@ -49,6 +49,36 @@ export function getYearWeek(date) {
   return `${d.getFullYear()}-W${weekNo.toString().padStart(2, '0')}`;
 }
 
+export function parseYearWeek(yearWeekStr) {
+  const [yearStr, weekStr] = yearWeekStr.split('-W');
+  return { year: parseInt(yearStr, 10), week: parseInt(weekStr, 10) };
+}
+
+export function getWeekDays(yearWeekStr) {
+  const { year, week } = parseYearWeek(yearWeekStr);
+  const simple = new Date(year, 0, 1 + (week - 1) * 7);
+  const dow = simple.getDay();
+  const isoWeekStart = simple;
+  if (dow <= 4)
+      isoWeekStart.setDate(simple.getDate() - simple.getDay() + 1);
+  else
+      isoWeekStart.setDate(simple.getDate() + 8 - simple.getDay());
+      
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(isoWeekStart);
+    d.setDate(isoWeekStart.getDate() + i);
+    days.push(d);
+  }
+  return days;
+}
+
+export function formatDateDayMonth(date) {
+  const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const d = new Date(date);
+  return `${days[d.getDay()]} ${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
 function fmt(d) {
   return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
 }
@@ -271,14 +301,20 @@ export const DataAggregator = {
     };
 
     const financials = this.getProjectFinancials(projects);
+    let totalPortfolioRev = 0;
+    let totalPortfolioMargin = 0;
+    
     financials.forEach(p => {
-      health.stats.totalMargin += p.marginPct;
+      health.stats.totalMargin += p.marginPct; // Keeping for backward compatibility if used elsewhere
+      totalPortfolioRev += p.totalRev;
+      totalPortfolioMargin += p.margin;
+      
       if (p.marginPct < 15) {
         health.atRisk.push({ name: p.name, reason: 'Basso Margine', value: `${p.marginPct.toFixed(1)}%` });
       }
     });
     
-    health.stats.avgMargin = health.stats.totalMargin / (health.stats.projectCount || 1);
+    health.stats.avgMargin = totalPortfolioRev > 0 ? (totalPortfolioMargin / totalPortfolioRev * 100) : 0;
 
     // Identify resources with >110% allocation in any week
     Object.entries(workload).forEach(([memberId, weeks]) => {

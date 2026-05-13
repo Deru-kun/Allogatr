@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { TEAM_DATABASE } from './data.js';
+import { ROLES, PROJECT_TEMPLATES } from './data.js';
 import { el, clear, fmtDays, getYearWeek, DataAggregator } from './utils.js';
 
 export function renderDashboard(container) {
@@ -23,6 +23,22 @@ export function renderDashboard(container) {
   // Charts Container (Resources)
   const chartsContainer = el('div', { className: 'dashboard-charts' });
   
+  // Role Chart
+  const chartCard = el('div', { className: 'glass-card chart-card' }, [
+    el('h3', { textContent: 'Allocazione per Ruolo' }),
+    el('div', { className: 'chart-wrapper' }, [
+      el('canvas', { id: 'roleChart' })
+    ])
+  ]);
+
+  // Capacity Chart
+  const capacityCard = el('div', { className: 'glass-card chart-card' }, [
+    el('h3', { textContent: 'Capacità vs Allocato (Media)' }),
+    el('div', { className: 'chart-wrapper' }, [
+      el('canvas', { id: 'capacityChart' })
+    ])
+  ]);
+
   // Team Distribution Chart
   const teamChartCard = el('div', { className: 'glass-card chart-card' }, [
     el('h3', { textContent: 'Allocazione per Team (Ecom, P&SD, CRM)' }),
@@ -76,7 +92,7 @@ export function renderDashboard(container) {
   ]);
 
   // Populate roles
-  const roles = new Set(TEAM_DATABASE.filter(m => m.id !== 36).map(m => m.titolo).filter(Boolean));
+  const roles = new Set(state.resources.filter(m => m.id !== 36).map(m => m.titolo).filter(Boolean));
   const roleSelectElem = filtersContainer.querySelector('#roleFilter');
   Array.from(roles).sort().forEach(r => {
     roleSelectElem.appendChild(el('option', { value: r, textContent: r }));
@@ -105,12 +121,12 @@ export function renderDashboard(container) {
     const roleFilter = roleSelect.value;
     const teamFilter = teamSelect.value;
 
-    const filteredMembers = TEAM_DATABASE.filter(member => {
+    const filteredMembers = state.resources.filter(member => {
       if (member.id === 36) return false;
       const allocation = state.getAllocationForMember(member.id);
       if (allocation.length === 0) return false;
       
-      const fullName = `${member.nome} ${member.cognome}`.toLowerCase();
+      const fullName = (member.cognome || '').toLowerCase();
       if (searchTerm && !fullName.includes(searchTerm)) return false;
       if (roleFilter && member.titolo !== roleFilter) return false;
       if (teamFilter && member.team !== teamFilter) return false;
@@ -155,7 +171,7 @@ export function renderDashboard(container) {
   };
 
   // Pre-calculate chart data once
-  for (const member of TEAM_DATABASE) {
+  for (const member of state.resources) {
     if (member.id === 36) continue;
     const allocation = state.getAllocationForMember(member.id);
     if (allocation.length === 0) continue;
@@ -460,7 +476,7 @@ function renderHeatmap(container) {
   const tbody = el('tbody');
   
   // Sort members by cognitive load/relevance or just cognome
-  TEAM_DATABASE.slice().sort((a,b) => a.cognome.localeCompare(b.cognome)).forEach(member => {
+  state.resources.slice().sort((a,b) => a.cognome.localeCompare(b.cognome)).forEach(member => {
     if (member.id === 36) return;
     const resWorkload = workload[member.id] || {};
     const hasAnyWork = Object.values(resWorkload).some(v => v > 0);
@@ -505,7 +521,7 @@ function renderBenchList(container) {
     weeks.push(getYearWeek(d));
   }
 
-  const benchMembers = TEAM_DATABASE.filter(m => {
+  const benchMembers = state.resources.filter(m => {
     if (m.id === 36) return false;
     const resWorkload = workload[m.id] || {};
     // Calculate average allocation in next 4 weeks
@@ -537,9 +553,9 @@ function renderBenchList(container) {
     const freePct = Math.round((1 - avg) * 100);
 
     const item = el('div', { className: 'bench-item' }, [
-      el('div', { className: 'bench-avatar', textContent: m.nome[0] + m.cognome[0] }),
+      el('div', { className: 'bench-avatar', textContent: m.cognome[0] }),
       el('div', { className: 'bench-info' }, [
-        el('strong', { textContent: `${m.nome} ${m.cognome}` }),
+        el('strong', { textContent: m.cognome }),
         el('small', { textContent: m.titolo || 'Altro' })
       ]),
       el('div', { className: 'bench-availability' }, [
@@ -679,12 +695,12 @@ function renderHealthSection(container) {
   });
 
   health.bottlenecks.forEach(b => {
-    const member = TEAM_DATABASE.find(m => m.id == b.memberId);
+    const member = state.resources.find(m => m.id == b.memberId);
     if (!member) return;
     alertsContainer.appendChild(el('div', { className: 'alert-card alert-warning' }, [
       el('div', { className: 'alert-icon', innerHTML: '<i class="ph-fill ph-users-three"></i>' }),
       el('div', { className: 'alert-content' }, [
-        el('strong', { textContent: `${member.nome} ${member.cognome}` }),
+        el('strong', { textContent: member.cognome }),
         el('p', { textContent: `Sovraccarico critico rilevato per ${b.count} settimane.` })
       ])
     ]));
@@ -718,7 +734,7 @@ function renderResourceTable(members) {
     const row = el('tr', {}, [
       el('td', {}, [
         el('div', { style: 'font-weight: 600;' }, [
-          el('span', { textContent: `${member.nome} ${member.cognome}` })
+          el('span', { textContent: member.cognome })
         ])
       ]),
       el('td', {}, [

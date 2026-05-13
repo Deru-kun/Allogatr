@@ -1,7 +1,6 @@
 import { state } from './state.js';
-import { TEAM_DATABASE, ROLES, getMembersByRole, getMemberById } from './data.js';
+import { ROLES, PROJECT_TEMPLATES, PROJECT_TYPES } from './data.js';
 import { el, clear, fmtCurrency, fmtPercent, fmtDays, getWeeksBetween, weekOverlapsRange, toISODate, showToast, downloadCSV } from './utils.js';
-import { PROJECT_TYPES } from './data.js';
 
 const DEFAULT_COLUMNS = {
   ruolo: true, livello: true, attivita: true,
@@ -27,15 +26,19 @@ export function renderEstimator(container, projectId) {
   // Back button
   wrapper.appendChild(el('button', { className: 'btn btn-ghost back-btn', innerHTML: '<i class="ph ph-arrow-left"></i> Tutti i progetti', onClick: () => { window.location.hash = '#/projects'; }}));
 
-  // ─── Project Header ──────────────────────────────
-  wrapper.appendChild(renderProjectHeader(proj, projectId));
+  // ─── Top Sections (Side-by-side Accordions) ──────
+  const topSections = el('div', { className: 'estimator-top-sections' });
+  
+  const infoSection = renderProjectInfo(proj, projectId);
+  topSections.appendChild(renderAccordion('Informazioni Progetto', infoSection, true));
 
-  // ─── Summary Cards ───────────────────────────────
+  const ecoSection = el('div', { className: 'project-header-section' });
+  ecoSection.appendChild(renderEcoParamsFields(proj, projectId));
   const summaryEl = el('div', { className: 'summary-cards', id: 'summary-cards' });
-  wrapper.appendChild(summaryEl);
+  ecoSection.appendChild(summaryEl);
+  topSections.appendChild(renderAccordion('Parametri Economici', ecoSection, true));
 
-  // ─── Column Visibility Toggle ────────────────────
-  wrapper.appendChild(renderColumnToggle(cols, projectId, container));
+  wrapper.appendChild(topSections);
 
   // ─── Team Grid ───────────────────────────────────
   wrapper.appendChild(renderTeamGrid(proj, projectId, cols, container));
@@ -44,8 +47,28 @@ export function renderEstimator(container, projectId) {
   updateSummary(proj);
 }
 
-function renderProjectHeader(proj, projectId) {
-  const section = el('div', { className: 'project-header-section glass-card' });
+function renderAccordion(title, contentNode, defaultOpen = true) {
+  const card = el('div', { className: `accordion-card glass-card ${defaultOpen ? 'open' : ''}` });
+  const header = el('div', { className: 'accordion-header', onClick: () => {
+    card.classList.toggle('open');
+    const icon = header.querySelector('i');
+    if (card.classList.contains('open')) {
+      icon.className = 'ph ph-caret-up';
+    } else {
+      icon.className = 'ph ph-caret-down';
+    }
+  }}, [
+    el('h3', { textContent: title }),
+    el('i', { className: `ph ${defaultOpen ? 'ph-caret-up' : 'ph-caret-down'}` })
+  ]);
+  const content = el('div', { className: 'accordion-content' });
+  content.appendChild(contentNode);
+  card.append(header, content);
+  return card;
+}
+
+function renderProjectInfo(proj, projectId) {
+  const section = el('div', { className: 'project-header-section' });
 
   const makeField = (label, value, key, type = 'text', options = null) => {
     const group = el('div', { className: 'field-group' }, [el('label', { textContent: label })]);
@@ -84,14 +107,13 @@ function renderProjectHeader(proj, projectId) {
 
   const row1 = el('div', { className: 'field-row' }, [
     makeField('Nome Progetto', proj.nome, 'nome'),
-    makeField('Cliente', proj.cliente, 'cliente'),
     makeField('Tipologia', proj.tipologia, 'tipologia', 'text', PROJECT_TYPES),
   ]);
 
   const row2 = el('div', { className: 'field-row' }, [
+    makeField('Cliente', proj.cliente, 'cliente'),
     makeField('Project Lead', proj.projectLead, 'projectLead'),
     makeField('Account Lead', proj.accountLead, 'accountLead'),
-    makeField('Buffer %', proj.bufferPercent, 'bufferPercent', 'number'),
   ]);
 
   const row3 = el('div', { className: 'field-row' }, [
@@ -103,14 +125,35 @@ function renderProjectHeader(proj, projectId) {
     ]),
   ]);
 
-  const row4 = el('div', { className: 'field-row' }, [
+  section.append(row1, row2, row3);
+  return section;
+}
+
+function renderEcoParamsFields(proj, projectId) {
+  const section = el('div', { className: 'project-header-section eco-params-inputs' });
+
+  const makeField = (label, value, key, type = 'text') => {
+    const group = el('div', { className: 'field-group' }, [el('label', { textContent: label })]);
+    const input = el('input', { type: type, value: value || '', onChange: (e) => {
+      state.updateProject(projectId, { [key]: e.target.value });
+      updateSummary(state.getProject(projectId));
+    }});
+    group.appendChild(input);
+    return group;
+  };
+
+  const row1 = el('div', { className: 'field-row' }, [
+    makeField('Buffer %', proj.bufferPercent, 'bufferPercent', 'number'),
     makeField('BD Fee %', proj.bdFeePercent, 'bdFeePercent', 'number'),
     makeField('Altre Revenues (€)', proj.altreRevenues, 'altreRevenues', 'number'),
+  ]);
+
+  const row2 = el('div', { className: 'field-row' }, [
     makeField('Costi Esterni (€)', proj.costiEsterni, 'costiEsterni', 'number'),
     makeField('Licenze (€)', proj.licenze, 'licenze', 'number'),
   ]);
 
-  section.append(row1, row2, row3, row4);
+  section.append(row1, row2);
   return section;
 }
 
@@ -120,63 +163,18 @@ function calcDuration(proj) {
   return `${weeks.length} settiman${weeks.length === 1 ? 'a' : 'e'}`;
 }
 
-function renderColumnToggle(cols, projectId, container) {
-  const bar = el('div', { className: 'column-toggle-bar' });
-  const btn = el('button', { className: 'btn btn-secondary btn-sm', innerHTML: '<i class="ph ph-gear"></i> Colonne', onClick: () => {
-    dropdown.classList.toggle('open');
-  }});
-  const dropdown = el('div', { className: 'column-dropdown' });
-
-  const labels = {
-    ruolo: 'Ruolo', livello: 'Livello', attivita: 'Attività',
-    datePersona: 'Date Coinvolgimento', costoStd: 'Costo Std €/gg', rateStd: 'Rate Std €/gg',
-    rateAcc: 'Rate Accordato', totGg: 'Tot Giorni', costoTot: 'Costo Totale',
-    ricavoTot: 'Ricavo Totale', marginEur: 'Margine €', marginPct: 'Margine %',
-  };
-
-  for (const [key, label] of Object.entries(labels)) {
-    const cb = el('label', { className: 'cb-label' }, [
-      el('input', { type: 'checkbox', checked: cols[key] ? 'checked' : undefined, onChange: (e) => {
-        cols[key] = e.target.checked;
-        state.updateProject(projectId, { _columnVisibility: { ...cols } });
-        renderEstimator(container, projectId);
-      }}),
-      document.createTextNode(' ' + label),
-    ]);
-    // Fix: set checked properly
-    cb.querySelector('input').checked = !!cols[key];
-    dropdown.appendChild(cb);
-  }
-
-  bar.append(btn, dropdown);
-
-  const actions = el('div', { className: 'bar-actions' }, [
-    el('button', { className: 'btn btn-secondary btn-sm', innerHTML: '<i class="ph ph-file-csv"></i> Esporta CSV', onClick: () => {
-      const proj = state.getProject(projectId);
-      if (proj) exportProjectCSV(proj);
-    }}),
-    el('button', { className: 'btn btn-primary btn-sm', innerHTML: '<i class="ph ph-plus"></i> Aggiungi Risorsa', onClick: () => {
-      showAddResourceModal(projectId, container);
-    }})
-  ]);
-
-  bar.appendChild(actions);
-
-  return bar;
-}
-
 function exportProjectCSV(proj) {
   const weeks = (proj.dataInizio && proj.dataFine) ? getWeeksBetween(proj.dataInizio, proj.dataFine) : [];
   const header = ['Risorsa', 'Ruolo', 'Livello', 'Attività', 'Inizio', 'Fine', 'Rate Accordato', 'Tot Giorni', 'Costo Totale', 'Ricavo Totale', ...weeks.map(w => w.label)];
   
   const rows = proj.team.map(m => {
-    const member = getMemberById(m.risorsaId);
+    const member = state.getResourceById(m.risorsaId);
     const totalDays = Object.values(m.settimane || {}).reduce((s, v) => s + (Number(v) || 0), 0);
     const costTot = totalDays * (m.costoStandard || 0);
     const revTot = totalDays * (m.rateAccordato || 0);
     
     return [
-      member ? `${member.cognome} ${member.nome}` : 'N/A',
+      member ? member.cognome : 'N/A',
       m.ruolo || '',
       member ? member.livello : '',
       m.attivita || '',
@@ -220,16 +218,17 @@ function showAddResourceModal(projectId, container) {
 
     if (!role) { nameSelect.disabled = true; return; }
 
-    const members = getMembersByRole(role);
+    const filteredMembers = state.getResourcesByRole(role);
+    if (filteredMembers.length === 0) { nameSelect.disabled = true; return; }
     nameSelect.disabled = false;
 
-    if (members.length === 1) {
+    if (filteredMembers.length === 1) {
       // Auto-select
-      nameSelect.appendChild(el('option', { value: String(members[0].id), textContent: members[0].cognome, selected: true }));
-      nameSelect.value = String(members[0].id);
-      showPreview(members[0], preview);
+      nameSelect.appendChild(el('option', { value: String(filteredMembers[0].id), textContent: filteredMembers[0].cognome, selected: true }));
+      nameSelect.value = String(filteredMembers[0].id);
+      showPreview(filteredMembers[0], preview);
     } else {
-      members.forEach(m => {
+      filteredMembers.forEach(m => {
         nameSelect.appendChild(el('option', { value: String(m.id), textContent: m.cognome }));
       });
     }
@@ -239,14 +238,14 @@ function showAddResourceModal(projectId, container) {
     clear(preview);
     const memberId = Number(nameSelect.value);
     if (!memberId) return;
-    const member = getMemberById(memberId);
+    const member = state.getResourceById(memberId);
     if (member) showPreview(member, preview);
   });
 
   const addBtn = el('button', { className: 'btn btn-primary', textContent: 'Aggiungi', onClick: () => {
     const memberId = Number(nameSelect.value);
     if (!memberId) { showToast('Seleziona una risorsa', 'error'); return; }
-    const member = getMemberById(memberId);
+    const member = state.getResourceById(memberId);
     if (member) {
       state.addTeamMember(projectId, member);
       overlay.remove();
@@ -279,6 +278,17 @@ function showPreview(member, container) {
 
 function renderTeamGrid(proj, projectId, cols, container) {
   const weeks = (proj.dataInizio && proj.dataFine) ? getWeeksBetween(proj.dataInizio, proj.dataFine) : [];
+  
+  const wrapper = el('div', { className: 'team-section-container' });
+  const header = el('div', { className: 'team-section-header' }, [
+    el('h3', { textContent: 'Team di progetto' }),
+    el('div', { className: 'team-section-actions' }, [
+       el('button', { className: 'btn btn-secondary btn-sm', innerHTML: '<i class="ph ph-file-csv"></i> Esporta CSV', onClick: () => { exportProjectCSV(proj); } }),
+       el('button', { className: 'btn btn-primary btn-sm', innerHTML: '<i class="ph ph-plus"></i> Aggiungi Risorsa', onClick: () => { showAddResourceModal(projectId, container); } })
+    ])
+  ]);
+  wrapper.appendChild(header);
+
   const section = el('div', { className: 'team-grid-wrapper' });
   const table = el('table', { className: 'team-grid' });
 
@@ -286,28 +296,15 @@ function renderTeamGrid(proj, projectId, cols, container) {
   const thead = el('thead');
   const headerRow = el('tr');
   headerRow.appendChild(el('th', { className: 'col-num sticky-left', textContent: '#' }));
-  headerRow.appendChild(el('th', { className: 'col-name sticky-left-2', textContent: 'Risorsa' }));
-  if (cols.ruolo) headerRow.appendChild(el('th', { textContent: 'Ruolo' }));
-  if (cols.livello) headerRow.appendChild(el('th', { textContent: 'Livello' }));
-  if (cols.attivita) headerRow.appendChild(el('th', { className: 'col-attivita', textContent: 'Attività' }));
-  if (cols.datePersona) {
-    headerRow.appendChild(el('th', { textContent: 'Da' }));
-    headerRow.appendChild(el('th', { textContent: 'A' }));
-  }
-  if (cols.costoStd) headerRow.appendChild(el('th', { textContent: 'Costo €/gg' }));
-  if (cols.rateStd) headerRow.appendChild(el('th', { textContent: 'Rate Std' }));
-  if (cols.rateAcc) headerRow.appendChild(el('th', { textContent: 'Rate Acc.' }));
+  headerRow.appendChild(el('th', { className: 'col-name sticky-left-2', textContent: 'Figura' }));
+  headerRow.appendChild(el('th', { textContent: 'Ruolo' }));
 
   // Weekly headers
   weeks.forEach(w => {
     headerRow.appendChild(el('th', { className: 'col-week', innerHTML: `<div class="week-label">${w.label}</div><div class="week-dates">${w.sublabel}</div>` }));
   });
 
-  if (cols.totGg) headerRow.appendChild(el('th', { className: 'col-result', textContent: 'Tot gg' }));
-  if (cols.costoTot) headerRow.appendChild(el('th', { className: 'col-result', textContent: 'Costo Tot.' }));
-  if (cols.ricavoTot) headerRow.appendChild(el('th', { className: 'col-result', textContent: 'Ricavo Tot.' }));
-  if (cols.marginEur) headerRow.appendChild(el('th', { className: 'col-result', textContent: 'Margine €' }));
-  if (cols.marginPct) headerRow.appendChild(el('th', { className: 'col-result', textContent: 'Margine %' }));
+  headerRow.appendChild(el('th', { className: 'col-result', textContent: 'Tot gg' }));
   headerRow.appendChild(el('th', { className: 'col-action', textContent: '' }));
 
   thead.appendChild(headerRow);
@@ -316,23 +313,14 @@ function renderTeamGrid(proj, projectId, cols, container) {
   // ─── Body ────────────────────────────────────────
   const tbody = el('tbody');
   proj.team.forEach((member, idx) => {
-    tbody.appendChild(renderTeamRow(member, idx, proj, projectId, weeks, cols, container));
+    tbody.appendChild(renderTeamRow(member, idx, proj, projectId, weeks, container));
   });
 
   // ─── Totals Row ──────────────────────────────────
   const totalsRow = el('tr', { className: 'totals-row' });
   totalsRow.appendChild(el('td', { className: 'sticky-left', textContent: '' }));
   totalsRow.appendChild(el('td', { className: 'sticky-left-2', innerHTML: '<strong>TOTALI</strong>' }));
-
-  let skipCols = 0;
-  if (cols.ruolo) skipCols++;
-  if (cols.livello) skipCols++;
-  if (cols.attivita) skipCols++;
-  if (cols.datePersona) skipCols += 2;
-  if (cols.costoStd) skipCols++;
-  if (cols.rateStd) skipCols++;
-  if (cols.rateAcc) skipCols++;
-  for (let i = 0; i < skipCols; i++) totalsRow.appendChild(el('td', { textContent: '' }));
+  totalsRow.appendChild(el('td', { textContent: '' })); // Ruolo
 
   // Weekly totals
   weeks.forEach(w => {
@@ -341,57 +329,40 @@ function renderTeamGrid(proj, projectId, cols, container) {
   });
 
   const grandTotalDays = proj.team.reduce((sum, m) => sum + Object.values(m.settimane || {}).reduce((s, v) => s + (Number(v) || 0), 0), 0);
-  const grandTotalCost = proj.team.reduce((sum, m) => { const d = Object.values(m.settimane || {}).reduce((s, v) => s + (Number(v) || 0), 0); return sum + d * (m.costoStandard || 0); }, 0);
-  const grandTotalRev = proj.team.reduce((sum, m) => { const d = Object.values(m.settimane || {}).reduce((s, v) => s + (Number(v) || 0), 0); return sum + d * (m.rateAccordato || 0); }, 0);
-  const grandMarginEur = grandTotalRev - grandTotalCost;
-  const grandMarginPct = grandTotalRev > 0 ? (grandMarginEur / grandTotalRev * 100) : 0;
-
-  if (cols.totGg) totalsRow.appendChild(el('td', { className: 'col-result total-cell', innerHTML: `<strong>${fmtDays(grandTotalDays)}</strong>` }));
-  if (cols.costoTot) totalsRow.appendChild(el('td', { className: 'col-result total-cell', innerHTML: `<strong>${fmtCurrency(grandTotalCost)}</strong>` }));
-  if (cols.ricavoTot) totalsRow.appendChild(el('td', { className: 'col-result total-cell', innerHTML: `<strong>${fmtCurrency(grandTotalRev)}</strong>` }));
-  if (cols.marginEur) totalsRow.appendChild(el('td', { className: 'col-result total-cell', innerHTML: `<strong>${fmtCurrency(grandMarginEur)}</strong>` }));
-  if (cols.marginPct) totalsRow.appendChild(el('td', { className: `col-result total-cell ${grandMarginPct >= 30 ? 'text-green' : grandMarginPct >= 15 ? 'text-yellow' : 'text-red'}`, innerHTML: `<strong>${fmtPercent(grandMarginPct)}</strong>` }));
+  
+  totalsRow.appendChild(el('td', { className: 'col-result total-cell', innerHTML: `<strong>${fmtDays(grandTotalDays)}</strong>` }));
   totalsRow.appendChild(el('td', { textContent: '' }));
 
   tbody.appendChild(totalsRow);
   table.appendChild(tbody);
   section.appendChild(table);
-  return section;
+  wrapper.appendChild(section);
+  return wrapper;
 }
 
-function renderTeamRow(member, idx, proj, projectId, weeks, cols, appContainer) {
-  const row = el('tr');
-  row.appendChild(el('td', { className: 'col-num sticky-left', textContent: String(idx + 1) }));
-  row.appendChild(el('td', { className: 'col-name sticky-left-2', innerHTML: `<strong>${member.cognome}</strong>` }));
+function renderTeamRow(member, idx, proj, projectId, weeks, appContainer) {
+  const frag = document.createDocumentFragment();
+  const rowMain = el('tr');
+  const rowExpanded = el('tr', { className: 'expanded-row' });
+  rowExpanded.style.display = 'none';
 
-  if (cols.ruolo) row.appendChild(makeEditableCell(member.ruolo, (v) => state.updateTeamMember(projectId, member.rowId, { ruolo: v })));
-  if (cols.livello) row.appendChild(makeEditableCell(member.livello, (v) => state.updateTeamMember(projectId, member.rowId, { livello: v })));
-  if (cols.attivita) {
-    const td = el('td', { className: 'col-attivita' });
-    const input = el('input', { type: 'text', className: 'cell-input input-wide', value: member.attivita || '', placeholder: 'Attività...', onChange: (e) => {
-      state.updateTeamMember(projectId, member.rowId, { attivita: e.target.value });
-    }});
-    td.appendChild(input);
-    row.appendChild(td);
-  }
+  rowMain.appendChild(el('td', { className: 'col-num sticky-left', textContent: String(idx + 1) }));
+  
+  const iconSpan = el('span', { className: 'cell-arrow', innerHTML: '<i class="ph ph-caret-down"></i>', onClick: () => {
+    const isHidden = rowExpanded.style.display === 'none';
+    rowExpanded.style.display = isHidden ? 'table-row' : 'none';
+    iconSpan.innerHTML = isHidden ? '<i class="ph ph-caret-up"></i>' : '<i class="ph ph-caret-down"></i>';
+  }});
+  
+  const nameCell = el('td', { className: 'col-name sticky-left-2' }, [
+    el('div', { className: 'name-cell-content' }, [
+      iconSpan,
+      el('strong', { textContent: member.cognome })
+    ])
+  ]);
+  rowMain.appendChild(nameCell);
 
-  if (cols.datePersona) {
-    row.appendChild(makeDateCell(member.dataInizio, (v) => {
-      state.updateTeamMember(projectId, member.rowId, { dataInizio: v });
-      renderEstimator(appContainer, projectId);
-    }));
-    row.appendChild(makeDateCell(member.dataFine, (v) => {
-      state.updateTeamMember(projectId, member.rowId, { dataFine: v });
-      renderEstimator(appContainer, projectId);
-    }));
-  }
-
-  if (cols.costoStd) row.appendChild(makeNumberCell(member.costoStandard, (v) => state.updateTeamMember(projectId, member.rowId, { costoStandard: v })));
-  if (cols.rateStd) row.appendChild(makeNumberCell(member.rateStandard, (v) => state.updateTeamMember(projectId, member.rowId, { rateStandard: v })));
-  if (cols.rateAcc) row.appendChild(makeNumberCell(member.rateAccordato, (v) => {
-    state.updateTeamMember(projectId, member.rowId, { rateAccordato: v });
-    updateSummary(state.getProject(projectId));
-  }));
+  rowMain.appendChild(makeEditableCell(member.ruolo, (v) => state.updateTeamMember(projectId, member.rowId, { ruolo: v })));
 
   // Weekly cells
   const memberStart = member.dataInizio || proj.dataInizio;
@@ -412,31 +383,27 @@ function renderTeamRow(member, idx, proj, projectId, weeks, cols, appContainer) 
         const val = Number(e.target.value) || 0;
         const settimane = { ...(member.settimane || {}), [w.key]: val };
         state.updateTeamMember(projectId, member.rowId, { settimane });
-        updateRowTotals(row, member, projectId, cols);
+        updateRowTotals(rowMain, rowExpanded, member, projectId);
         updateSummary(state.getProject(projectId));
         const updatedMember = state.getProject(projectId).team.find(m => m.rowId === member.rowId);
         applyHeatmapAndValidation(input, updatedMember, w.key, projectId);
       });
       td.appendChild(input);
     }
-    row.appendChild(td);
+    rowMain.appendChild(td);
   });
 
-  // Calculated columns
+  // Calculate fields
   const totalDays = Object.values(member.settimane || {}).reduce((s, v) => s + (Number(v) || 0), 0);
   const costTot = totalDays * (member.costoStandard || 0);
   const revTot = totalDays * (member.rateAccordato || 0);
   const marginEur = revTot - costTot;
   const marginPct = revTot > 0 ? (marginEur / revTot * 100) : 0;
 
-  if (cols.totGg) row.appendChild(el('td', { className: 'col-result', textContent: fmtDays(totalDays), dataset: { field: 'totGg' } }));
-  if (cols.costoTot) row.appendChild(el('td', { className: 'col-result', textContent: fmtCurrency(costTot), dataset: { field: 'costoTot' } }));
-  if (cols.ricavoTot) row.appendChild(el('td', { className: 'col-result', textContent: fmtCurrency(revTot), dataset: { field: 'ricavoTot' } }));
-  if (cols.marginEur) row.appendChild(el('td', { className: 'col-result', textContent: fmtCurrency(marginEur), dataset: { field: 'marginEur' } }));
-  if (cols.marginPct) row.appendChild(el('td', { className: `col-result ${marginPct >= 30 ? 'text-green' : marginPct >= 15 ? 'text-yellow' : 'text-red'}`, textContent: fmtPercent(marginPct), dataset: { field: 'marginPct' } }));
+  rowMain.appendChild(el('td', { className: 'col-result', textContent: fmtDays(totalDays), dataset: { field: 'totGg' } }));
 
   // Delete button
-  row.appendChild(el('td', { className: 'col-action' }, [
+  rowMain.appendChild(el('td', { className: 'col-action' }, [
     el('button', { className: 'btn-icon btn-danger', innerHTML: '<i class="ph ph-trash"></i>', title: 'Rimuovi', onClick: () => {
       state.removeTeamMember(projectId, member.rowId);
       renderEstimator(appContainer, projectId);
@@ -444,10 +411,87 @@ function renderTeamRow(member, idx, proj, projectId, weeks, cols, appContainer) 
     }}),
   ]));
 
-  return row;
+  // ─── Expanded Content ──────────────────────────────
+  const colspan = 5 + weeks.length;
+  const expTd = el('td', { colSpan: colspan });
+  const expContent = el('div', { className: 'expanded-content' });
+
+  const dbMember = state.getResourceById(member.risorsaId);
+  const tipologia = dbMember ? dbMember.tipologia : '—';
+  
+  // Define inputs first
+  const daInput = el('input', { type: 'text', className: 'cell-input', value: toISODate(member.dataInizio) });
+  daInput.addEventListener('change', (e) => {
+    state.updateTeamMember(projectId, member.rowId, { dataInizio: e.target.value });
+    renderEstimator(appContainer, projectId);
+  });
+  setTimeout(() => flatpickr(daInput, { dateFormat: 'Y-m-d', defaultDate: member.dataInizio ? toISODate(member.dataInizio) : null, locale: 'it' }), 0);
+
+  const aInput = el('input', { type: 'text', className: 'cell-input', value: toISODate(member.dataFine) });
+  aInput.addEventListener('change', (e) => {
+    state.updateTeamMember(projectId, member.rowId, { dataFine: e.target.value });
+    renderEstimator(appContainer, projectId);
+  });
+  setTimeout(() => flatpickr(aInput, { dateFormat: 'Y-m-d', defaultDate: member.dataFine ? toISODate(member.dataFine) : null, locale: 'it' }), 0);
+
+  const costoInput = el('input', { type: 'number', className: 'cell-input', value: member.costoStandard || 0 });
+  costoInput.addEventListener('change', (e) => state.updateTeamMember(projectId, member.rowId, { costoStandard: Number(e.target.value) || 0 }));
+
+  const rateStdInput = el('input', { type: 'number', className: 'cell-input', value: member.rateStandard || 0 });
+  rateStdInput.addEventListener('change', (e) => state.updateTeamMember(projectId, member.rowId, { rateStandard: Number(e.target.value) || 0 }));
+
+  const rateAccInput = el('input', { type: 'number', className: 'cell-input', value: member.rateAccordato || 0 });
+  rateAccInput.addEventListener('change', (e) => {
+    state.updateTeamMember(projectId, member.rowId, { rateAccordato: Number(e.target.value) || 0 });
+    updateRowTotals(rowMain, rowExpanded, member, projectId);
+    updateSummary(state.getProject(projectId));
+  });
+
+  const attInput = el('input', { type: 'text', className: 'cell-input', value: member.attivita || '', placeholder: 'Descrizione attività...' });
+  attInput.addEventListener('change', (e) => state.updateTeamMember(projectId, member.rowId, { attivita: e.target.value }));
+
+  // Create Grid
+  const expGrid = el('div', { className: 'expanded-columns' });
+
+  // Col 1: Inquadramento e Date
+  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Tipologia' }), el('div', { className: 'computed-text', textContent: tipologia })]),
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Data Inizio' }), daInput]),
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Data Fine' }), aInput])
+  ]));
+
+  // Col 2: Parametri Unitari
+  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Costo Std €/gg' }), costoInput]),
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Rate Std €/gg' }), rateStdInput]),
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Rate Accordato €/gg' }), rateAccInput])
+  ]));
+
+  // Col 3: Indicatori Economici (Totali)
+  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Costo Totale' }), el('div', { className: 'computed-text', textContent: fmtCurrency(costTot), dataset: { field: 'costoTot' } })]),
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Ricavo Totale' }), el('div', { className: 'computed-text', textContent: fmtCurrency(revTot), dataset: { field: 'ricavoTot' } })])
+  ]));
+
+  // Col 4: Margini
+  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Margine €' }), el('div', { className: 'computed-text', textContent: fmtCurrency(marginEur), dataset: { field: 'marginEur' } })]),
+    el('div', { className: 'field-group' }, [el('label', { textContent: 'Margine %' }), el('div', { className: `computed-text ${marginPct >= 30 ? 'text-green' : marginPct >= 15 ? 'text-yellow' : 'text-red'}`, textContent: fmtPercent(marginPct), dataset: { field: 'marginPct' } })])
+  ]));
+
+  // Bottom Row for Activity Notes
+  const bottomRow = el('div', { className: 'expanded-notes-row' });
+  bottomRow.appendChild(el('div', { className: 'field-group' }, [el('label', { textContent: 'Attività / Note' }), attInput]));
+
+  expContent.append(expGrid, bottomRow);
+  expTd.appendChild(expContent);
+  rowExpanded.appendChild(expTd);
+
+  frag.append(rowMain, rowExpanded);
+  return frag;
 }
 
-function updateRowTotals(row, member, projectId, cols) {
+function updateRowTotals(rowMain, rowExpanded, member, projectId) {
   const updated = state.getProject(projectId)?.team.find(m => m.rowId === member.rowId);
   if (!updated) return;
   const totalDays = Object.values(updated.settimane || {}).reduce((s, v) => s + (Number(v) || 0), 0);
@@ -456,15 +500,20 @@ function updateRowTotals(row, member, projectId, cols) {
   const marginEur = revTot - costTot;
   const marginPct = revTot > 0 ? (marginEur / revTot * 100) : 0;
 
-  row.querySelectorAll('td[data-field]').forEach(td => {
-    switch (td.dataset.field) {
-      case 'totGg': td.textContent = fmtDays(totalDays); break;
-      case 'costoTot': td.textContent = fmtCurrency(costTot); break;
-      case 'ricavoTot': td.textContent = fmtCurrency(revTot); break;
-      case 'marginEur': td.textContent = fmtCurrency(marginEur); break;
+  const fields = [
+    ...rowMain.querySelectorAll('[data-field]'),
+    ...rowExpanded.querySelectorAll('[data-field]')
+  ];
+
+  fields.forEach(node => {
+    switch (node.dataset.field) {
+      case 'totGg': node.textContent = fmtDays(totalDays); break;
+      case 'costoTot': node.textContent = fmtCurrency(costTot); break;
+      case 'ricavoTot': node.textContent = fmtCurrency(revTot); break;
+      case 'marginEur': node.textContent = fmtCurrency(marginEur); break;
       case 'marginPct':
-        td.textContent = fmtPercent(marginPct);
-        td.className = `col-result ${marginPct >= 30 ? 'text-green' : marginPct >= 15 ? 'text-yellow' : 'text-red'}`;
+        node.textContent = fmtPercent(marginPct);
+        node.className = `computed-text ${marginPct >= 30 ? 'text-green' : marginPct >= 15 ? 'text-yellow' : 'text-red'}`;
         break;
     }
   });
@@ -550,7 +599,7 @@ function makeDateCell(value, onChange) {
 
 function applyHeatmapAndValidation(input, member, weekKey, projectId) {
   const memberId = member.risorsaId;
-  const dbMember = getMemberById(memberId);
+  const dbMember = state.getResourceById(memberId);
   const maxDays = dbMember ? dbMember.giorniSett : 5;
   
   const allAllocations = state.getAllocationForMember(memberId);
