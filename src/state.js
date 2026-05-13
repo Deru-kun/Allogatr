@@ -9,6 +9,7 @@ class AppState {
     const data = this._load() || {};
     this.projects = data.projects || {};
     this.resources = (data.resources && data.resources.length > 0) ? data.resources : [...TEAM_DATABASE];
+    this.users = data.users || [];
     this.timesheets = data.timesheets || {};
     this.timesheetSettings = data.timesheetSettings || {};
     this.listeners = [];
@@ -97,9 +98,48 @@ class AppState {
   _save() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       projects: this.projects,
-      resources: this.resources
+      resources: this.resources,
+      users: this.users,
+      timesheets: this.timesheets,
+      timesheetSettings: this.timesheetSettings
     }));
     this.listeners.forEach(fn => fn());
+  }
+
+  // ─── Auth / Users ─────────────────────────────────────
+  getUser(username) {
+    if (username === 'andrea.bertini@arad.digital') {
+      return { username, password: 'Arad123321!', name: 'Andrea', surname: 'Bertini' };
+    }
+    return this.users.find(u => u.username === username);
+  }
+
+  registerUser({ name, surname, username, password }) {
+    if (this.getUser(username)) {
+      throw new Error("Utente già registrato");
+    }
+    if (!username.endsWith('@arad.digital')) {
+      throw new Error("Lo username deve terminare con @arad.digital");
+    }
+    this.users.push({ name, surname, username, password });
+    
+    // Create new resource
+    const newId = Math.max(...this.resources.map(r => r.id), 0) + 1;
+    this.resources.push({
+      id: newId,
+      cognome: surname,
+      nome: name,
+      titolo: "Consultant",
+      tipologia: "Dipendente",
+      costoGg: 350,
+      rateGg: 600,
+      disponibile: true,
+      disponibilitaPct: 100,
+      giorniSett: 5.0,
+      team: "Altro"
+    });
+    
+    this._save();
   }
 
   onChange(fn) {
