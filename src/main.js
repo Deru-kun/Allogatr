@@ -14,7 +14,7 @@ if ('serviceWorker' in navigator) {
 
 const app = document.querySelector('#app');
 
-function checkAuth() {
+export function checkAuth() {
   const authData = localStorage.getItem('allogatr_auth');
   if (authData) {
     try {
@@ -34,9 +34,10 @@ function initMainApp() {
   const auth = checkAuth();
   let userName = 'Utente Sconosciuto';
   let initial = 'U';
+  let dbUser = null;
   
   if (auth && auth.user) {
-    const dbUser = state.getUser(auth.user);
+    dbUser = state.getUser(auth.user);
     if (dbUser) {
       userName = `${dbUser.name} ${dbUser.surname}`;
       initial = dbUser.name.charAt(0).toUpperCase();
@@ -63,7 +64,10 @@ function initMainApp() {
       el('nav', { className: 'nav-links' }, [
         el('a', { href: '#/projects', id: 'nav-projects', innerHTML: '<span class="icon"><i class="ph ph-folder-open"></i></span> <span class="nav-text">Progetti</span>' }),
         el('a', { href: '#/dashboard', id: 'nav-dashboard', innerHTML: '<span class="icon"><i class="ph ph-chart-line-up"></i></span> <span class="nav-text">Dashboard</span>' }),
-        el('a', { href: '#/resources', id: 'nav-resources', innerHTML: '<span class="icon"><i class="ph ph-users"></i></span> <span class="nav-text">Risorse</span>' }),
+        ...(dbUser?.role === 'admin' ? [
+          el('a', { href: '#/resources', id: 'nav-resources', innerHTML: '<span class="icon"><i class="ph ph-users"></i></span> <span class="nav-text">Risorse</span>' }),
+          el('a', { href: '#/users', id: 'nav-users', innerHTML: '<span class="icon"><i class="ph ph-shield-check"></i></span> <span class="nav-text">Gestione Utenti</span>' })
+        ] : []),
         el('a', { href: '#/timesheet', id: 'nav-timesheet', innerHTML: '<span class="icon"><i class="ph ph-calendar"></i></span> <span class="nav-text">Timesheet</span>' }),
       ]),
     ]),
@@ -157,6 +161,16 @@ function handleRoute() {
     if (navItem) navItem.classList.add('active');
     updateTopbar('Risorse', 'Gestisci il database delle risorse e i loro costi.');
     import('./resources.js').then(m => m.renderResources(content));
+  } else if (segments[0] === 'account') {
+    const navItem = document.getElementById('nav-account');
+    if (navItem) navItem.classList.add('active');
+    updateTopbar('Il Mio Account', 'Gestisci il tuo profilo e la sicurezza.');
+    import('./account.js').then(m => m.renderAccount(content));
+  } else if (segments[0] === 'users') {
+    const navItem = document.getElementById('nav-users');
+    if (navItem) navItem.classList.add('active');
+    updateTopbar('Utenti', 'Gestione accessi e ruoli di sistema.');
+    import('./users.js').then(m => m.renderUsers(content));
   } else if (segments[0] === 'timesheet') {
     const navItem = document.getElementById('nav-timesheet');
     if (navItem) navItem.classList.add('active');
@@ -167,16 +181,12 @@ function handleRoute() {
     if (navItem) navItem.classList.add('active');
     updateTopbar('Project Estimator', 'Stima il budget e alloca le risorse.');
     renderEstimator(content, segments[1]);
-  } else if (segments[0] === 'account') {
-    document.querySelectorAll('.nav-links a').forEach(a => a.classList.remove('active'));
-    updateTopbar('Account', 'Gestione del tuo profilo personale.');
-    content.innerHTML = '<div class="glass-card" style="padding: 2rem;"><h3>Impostazioni Account</h3><p>Area in costruzione. Qui potrai modificare i tuoi dati personali, la password e le preferenze.</p></div>';
   } else {
     window.location.hash = '#/projects';
   }
 }
 
-function startApp() {
+export function startApp() {
   if (checkAuth()) {
     initMainApp();
   } else {

@@ -1,12 +1,26 @@
 import { state } from './state.js';
 import { el, clear, fmtCurrency, showToast, confirmDialog } from './utils.js';
 import { PROJECT_TEMPLATES } from './data.js';
+import { checkAuth } from './main.js';
 
 export function renderProjects(container) {
   clear(container);
   let projects = state.listProjects();
   const query = state.getSearchQuery();
+
+  const auth = checkAuth();
+  const dbUser = auth ? state.getUser(auth.user) : null;
+  const isAdmin = dbUser?.role === 'admin';
   
+  if (!isAdmin && dbUser) {
+    const userResource = state.resources.find(r => r.nome === dbUser.name && r.cognome === dbUser.surname);
+    if (userResource) {
+      projects = projects.filter(p => p.team.some(m => m.risorsaId === userResource.id));
+    } else {
+      projects = [];
+    }
+  }
+
   if (query) {
     projects = projects.filter(p => 
       (p.nome || '').toLowerCase().includes(query) || 
@@ -16,7 +30,7 @@ export function renderProjects(container) {
   const wrapper = el('div', { className: 'projects-view' });
 
   const header = el('div', { className: 'projects-header' }, [
-    el('div', { className: 'header-actions' }, [
+    el('div', { className: 'header-actions' }, isAdmin ? [
       el('button', { className: 'btn btn-secondary', innerHTML: '<i class="ph ph-download-simple"></i> Importa', onClick: importProjects }),
       el('button', { className: 'btn btn-secondary', innerHTML: '<i class="ph ph-upload-simple"></i> Esporta', onClick: exportProjects }),
       el('button', { className: 'btn btn-secondary', innerHTML: '<i class="ph ph-copy"></i> Template', onClick: showTemplateModal }),
@@ -24,7 +38,7 @@ export function renderProjects(container) {
         const id = state.createProject();
         window.location.hash = `#/project/${id}`;
       }}),
-    ]),
+    ] : []),
   ]);
   wrapper.appendChild(header);
 
@@ -32,15 +46,15 @@ export function renderProjects(container) {
     wrapper.appendChild(el('div', { className: 'empty-state' }, [
       el('div', { className: 'empty-icon', innerHTML: '<i class="ph-fill ph-folder-open"></i>' }),
       el('h2', { textContent: 'Nessun progetto' }),
-      el('p', { textContent: 'Crea il tuo primo progetto per iniziare.' }),
-      el('button', { className: 'btn btn-primary btn-lg', innerHTML: '<i class="ph ph-plus"></i> Crea Progetto', onClick: () => {
+      el('p', { textContent: isAdmin ? 'Crea il tuo primo progetto per iniziare.' : 'Nessun progetto assegnato al momento.' }),
+      ...(isAdmin ? [el('button', { className: 'btn btn-primary btn-lg', innerHTML: '<i class="ph ph-plus"></i> Crea Progetto', onClick: () => {
         const id = state.createProject();
         window.location.hash = `#/project/${id}`;
-      }}),
+      }})] : [])
     ]));
   } else {
     const grid = el('div', { className: 'projects-grid' });
-    projects.forEach(proj => grid.appendChild(makeCard(proj)));
+    projects.forEach(proj => grid.appendChild(makeCard(proj, isAdmin)));
     wrapper.appendChild(grid);
   }
   container.appendChild(wrapper);
@@ -58,15 +72,28 @@ function calcProjectStats(proj) {
   return { totalDays, totalRev, totalCost, margin };
 }
 
-function makeCard(proj) {
+function makeCard(proj, isAdmin) {
   const { totalDays, totalRev, margin } = calcProjectStats(proj);
+  
+  const statsList = [
+    stat(String(proj.team.length), 'Risorse'),
+    stat(totalDays.toFixed(1), 'Giorni'),
+  ];
+
+  if (isAdmin) {
+    statsList.push(
+      stat(fmtCurrency(totalRev), 'Ricavo'),
+      stat(margin.toFixed(1) + '%', 'Margine', margin >= 30 ? 'text-green' : margin >= 15 ? 'text-yellow' : 'text-red')
+    );
+  }
+
   return el('div', { className: 'project-card', onClick: (e) => {
     if (e.target.closest('.card-actions')) return;
     window.location.hash = `#/project/${proj.id}`;
   }}, [
     el('div', { className: 'card-header' }, [
       el('span', { className: `card-badge badge-${proj.tipologia === 'Fixed Fee' ? 'fixed' : 'tm'}`, textContent: proj.tipologia || 'N/D' }),
-      el('div', { className: 'card-actions' }, [
+      ...(isAdmin ? [el('div', { className: 'card-actions' }, [
         el('button', { className: 'btn-icon', title: 'Duplica', innerHTML: '<i class="ph ph-copy"></i>', onClick: () => {
           state.duplicateProject(proj.id);
           renderProjects(document.getElementById('app-content'));
@@ -78,19 +105,14 @@ function makeCard(proj) {
             showToast('Progetto eliminato', 'success');
           });
         }}),
-      ]),
+      ])] : []),
     ]),
     el('h3', { className: 'card-title', textContent: proj.nome || 'Senza nome' }),
     el('p', { className: 'card-client', textContent: proj.cliente || 'Nessun cliente' }),
     el('div', { className: 'card-meta' }, [
       el('span', { innerHTML: `<i class="ph ph-calendar-blank"></i> ${proj.dataInizio ? `${proj.dataInizio} → ${proj.dataFine || '...'}` : 'Date non impostate'}` }),
     ]),
-    el('div', { className: 'card-stats' }, [
-      stat(String(proj.team.length), 'Risorse'),
-      stat(totalDays.toFixed(1), 'Giorni'),
-      stat(fmtCurrency(totalRev), 'Ricavo'),
-      stat(margin.toFixed(1) + '%', 'Margine', margin >= 30 ? 'text-green' : margin >= 15 ? 'text-yellow' : 'text-red'),
-    ]),
+    el('div', { className: 'card-stats' }, statsList),
   ]);
 }
 

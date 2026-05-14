@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { ROLES, PROJECT_TEMPLATES, PROJECT_TYPES } from './data.js';
 import { el, clear, fmtCurrency, fmtPercent, fmtDays, getWeeksBetween, weekOverlapsRange, toISODate, showToast, downloadCSV } from './utils.js';
+import { checkAuth } from './main.js';
 
 const DEFAULT_COLUMNS = {
   ruolo: true, livello: true, attivita: true,
@@ -20,6 +21,10 @@ export function renderEstimator(container, projectId) {
     return;
   }
 
+  const auth = checkAuth();
+  const dbUser = auth ? state.getUser(auth.user) : null;
+  const isAdmin = dbUser?.role === 'admin';
+
   const cols = { ...DEFAULT_COLUMNS, ...(proj._columnVisibility || {}) };
   const wrapper = el('div', { className: 'estimator-view' });
 
@@ -32,19 +37,23 @@ export function renderEstimator(container, projectId) {
   const infoSection = renderProjectInfo(proj, projectId);
   topSections.appendChild(renderAccordion('Informazioni Progetto', infoSection, true));
 
-  const ecoSection = el('div', { className: 'project-header-section' });
-  ecoSection.appendChild(renderEcoParamsFields(proj, projectId));
-  const summaryEl = el('div', { className: 'summary-cards', id: 'summary-cards' });
-  ecoSection.appendChild(summaryEl);
-  topSections.appendChild(renderAccordion('Parametri Economici', ecoSection, true));
+  if (isAdmin) {
+    const ecoSection = el('div', { className: 'project-header-section' });
+    ecoSection.appendChild(renderEcoParamsFields(proj, projectId));
+    const summaryEl = el('div', { className: 'summary-cards', id: 'summary-cards' });
+    ecoSection.appendChild(summaryEl);
+    topSections.appendChild(renderAccordion('Parametri Economici', ecoSection, true));
+  }
 
   wrapper.appendChild(topSections);
 
   // ─── Team Grid ───────────────────────────────────
-  wrapper.appendChild(renderTeamGrid(proj, projectId, cols, container));
+  wrapper.appendChild(renderTeamGrid(proj, projectId, cols, container, isAdmin));
 
   container.appendChild(wrapper);
-  updateSummary(proj);
+  if (isAdmin) {
+    updateSummary(proj);
+  }
 }
 
 function renderAccordion(title, contentNode, defaultOpen = true) {
@@ -163,9 +172,14 @@ function calcDuration(proj) {
   return `${weeks.length} settiman${weeks.length === 1 ? 'a' : 'e'}`;
 }
 
-function exportProjectCSV(proj) {
+function exportProjectCSV(proj, isAdmin) {
   const weeks = (proj.dataInizio && proj.dataFine) ? getWeeksBetween(proj.dataInizio, proj.dataFine) : [];
-  const header = ['Risorsa', 'Ruolo', 'Livello', 'Attività', 'Inizio', 'Fine', 'Rate Accordato', 'Tot Giorni', 'Costo Totale', 'Ricavo Totale', ...weeks.map(w => w.label)];
+  
+  const header = ['Risorsa', 'Ruolo', 'Livello', 'Attività', 'Inizio', 'Fine', 'Tot Giorni'];
+  if (isAdmin) {
+    header.push('Rate Accordato', 'Costo Totale', 'Ricavo Totale');
+  }
+  header.push(...weeks.map(w => w.label));
   
   const rows = proj.team.map(m => {
     const member = state.getResourceById(m.risorsaId);
@@ -173,19 +187,23 @@ function exportProjectCSV(proj) {
     const costTot = totalDays * (m.costoStandard || 0);
     const revTot = totalDays * (m.rateAccordato || 0);
     
-    return [
+    const row = [
       member ? member.cognome : 'N/A',
       m.ruolo || '',
       member ? member.livello : '',
       m.attivita || '',
       m.dataInizio || '',
       m.dataFine || '',
-      m.rateAccordato || 0,
-      totalDays,
-      costTot,
-      revTot,
-      ...weeks.map(w => m.settimane[w.label] || 0)
+      totalDays
     ];
+
+    if (isAdmin) {
+      row.push(m.rateAccordato || 0, costTot, revTot);
+    }
+
+    row.push(...weeks.map(w => m.settimane[w.label] || 0));
+
+    return row;
   });
   
   downloadCSV(`${proj.nome.replace(/\s+/g, '_')}_budget.csv`, [header, ...rows]);
@@ -276,14 +294,14 @@ function showPreview(member, container) {
   ]));
 }
 
-function renderTeamGrid(proj, projectId, cols, container) {
+function renderTeamGrid(proj, projectId, cols, container, isAdmin) {
   const weeks = (proj.dataInizio && proj.dataFine) ? getWeeksBetween(proj.dataInizio, proj.dataFine) : [];
   
   const wrapper = el('div', { className: 'team-section-container' });
   const header = el('div', { className: 'team-section-header' }, [
     el('h3', { textContent: 'Team di progetto' }),
     el('div', { className: 'team-section-actions' }, [
-       el('button', { className: 'btn btn-secondary btn-sm', innerHTML: '<i class="ph ph-file-csv"></i> Esporta CSV', onClick: () => { exportProjectCSV(proj); } }),
+       el('button', { className: 'btn btn-secondary btn-sm', innerHTML: '<i class="ph ph-file-csv"></i> Esporta CSV', onClick: () => { exportProjectCSV(proj, isAdmin); } }),
        el('button', { className: 'btn btn-primary btn-sm', innerHTML: '<i class="ph ph-plus"></i> Aggiungi Risorsa', onClick: () => { showAddResourceModal(projectId, container); } })
     ])
   ]);
@@ -313,7 +331,7 @@ function renderTeamGrid(proj, projectId, cols, container) {
   // ─── Body ────────────────────────────────────────
   const tbody = el('tbody');
   proj.team.forEach((member, idx) => {
-    tbody.appendChild(renderTeamRow(member, idx, proj, projectId, weeks, container));
+    tbody.appendChild(renderTeamRow(member, idx, proj, projectId, weeks, container, isAdmin));
   });
 
   // ─── Totals Row ──────────────────────────────────
@@ -340,7 +358,7 @@ function renderTeamGrid(proj, projectId, cols, container) {
   return wrapper;
 }
 
-function renderTeamRow(member, idx, proj, projectId, weeks, appContainer) {
+function renderTeamRow(member, idx, proj, projectId, weeks, appContainer, isAdmin) {
   const frag = document.createDocumentFragment();
   const rowMain = el('tr');
   const rowExpanded = el('tr', { className: 'expanded-row' });
@@ -460,24 +478,26 @@ function renderTeamRow(member, idx, proj, projectId, weeks, appContainer) {
     el('div', { className: 'field-group' }, [el('label', { textContent: 'Data Fine' }), aInput])
   ]));
 
-  // Col 2: Parametri Unitari
-  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Costo Std €/gg' }), costoInput]),
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Rate Std €/gg' }), rateStdInput]),
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Rate Accordato €/gg' }), rateAccInput])
-  ]));
+  // Col 2: Parametri Unitari (Only for Admin)
+  if (isAdmin) {
+    expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Costo Std €/gg' }), costoInput]),
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Rate Std €/gg' }), rateStdInput]),
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Rate Accordato €/gg' }), rateAccInput])
+    ]));
 
-  // Col 3: Indicatori Economici (Totali)
-  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Costo Totale' }), el('div', { className: 'computed-text', textContent: fmtCurrency(costTot), dataset: { field: 'costoTot' } })]),
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Ricavo Totale' }), el('div', { className: 'computed-text', textContent: fmtCurrency(revTot), dataset: { field: 'ricavoTot' } })])
-  ]));
+    // Col 3: Indicatori Economici (Totali)
+    expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Costo Totale' }), el('div', { className: 'computed-text', textContent: fmtCurrency(costTot), dataset: { field: 'costoTot' } })]),
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Ricavo Totale' }), el('div', { className: 'computed-text', textContent: fmtCurrency(revTot), dataset: { field: 'ricavoTot' } })])
+    ]));
 
-  // Col 4: Margini
-  expGrid.appendChild(el('div', { className: 'expanded-col' }, [
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Margine €' }), el('div', { className: 'computed-text', textContent: fmtCurrency(marginEur), dataset: { field: 'marginEur' } })]),
-    el('div', { className: 'field-group' }, [el('label', { textContent: 'Margine %' }), el('div', { className: `computed-text ${marginPct >= 30 ? 'text-green' : marginPct >= 15 ? 'text-yellow' : 'text-red'}`, textContent: fmtPercent(marginPct), dataset: { field: 'marginPct' } })])
-  ]));
+    // Col 4: Margini
+    expGrid.appendChild(el('div', { className: 'expanded-col' }, [
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Margine €' }), el('div', { className: 'computed-text', textContent: fmtCurrency(marginEur), dataset: { field: 'marginEur' } })]),
+      el('div', { className: 'field-group' }, [el('label', { textContent: 'Margine %' }), el('div', { className: `computed-text ${marginPct >= 30 ? 'text-green' : marginPct >= 15 ? 'text-yellow' : 'text-red'}`, textContent: fmtPercent(marginPct), dataset: { field: 'marginPct' } })])
+    ]));
+  }
 
   // Bottom Row for Activity Notes
   const bottomRow = el('div', { className: 'expanded-notes-row' });

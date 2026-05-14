@@ -14,6 +14,12 @@ class AppState {
     this.timesheetSettings = data.timesheetSettings || {};
     this.listeners = [];
     this.searchQuery = '';
+    const andrea = this.users.find(u => u.username === 'andrea.bertini@arad.digital');
+    if (!andrea) {
+      this.users.push({ username: 'andrea.bertini@arad.digital', password: 'password123', name: 'Andrea', surname: 'Bertini', role: 'admin' });
+    } else {
+      andrea.role = 'admin'; // Forza il ruolo ad admin in caso sia registrato come consultant
+    }
 
     if (Object.keys(this.projects).length < 5) {
       this.seedDemoProjects();
@@ -108,10 +114,28 @@ class AppState {
 
   // ─── Auth / Users ─────────────────────────────────────
   getUser(username) {
-    if (username === 'andrea.bertini@arad.digital') {
-      return { username, password: 'Arad123321!', name: 'Andrea', surname: 'Bertini' };
-    }
     return this.users.find(u => u.username === username);
+  }
+
+  updateUser(username, data) {
+    const userIndex = this.users.findIndex(u => u.username === username);
+    if (userIndex !== -1) {
+      this.users[userIndex] = { ...this.users[userIndex], ...data };
+      this._save();
+    }
+  }
+
+  updatePassword(username, oldPassword, newPassword) {
+    const userIndex = this.users.findIndex(u => u.username === username);
+    if (userIndex !== -1) {
+      if (this.users[userIndex].password !== oldPassword) {
+        throw new Error("La vecchia password è errata.");
+      }
+      this.users[userIndex].password = newPassword;
+      this._save();
+    } else {
+      throw new Error("Utente non trovato.");
+    }
   }
 
   registerUser({ name, surname, username, password }) {
@@ -121,7 +145,7 @@ class AppState {
     if (!username.endsWith('@arad.digital')) {
       throw new Error("Lo username deve terminare con @arad.digital");
     }
-    this.users.push({ name, surname, username, password });
+    this.users.push({ name, surname, username, password, role: 'consultant' });
     
     // Create new resource
     const newId = Math.max(...this.resources.map(r => r.id), 0) + 1;
